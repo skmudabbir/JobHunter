@@ -13,7 +13,8 @@ load_dotenv()
 app = FastAPI(title="JobHunter", version="1.0.0")
 
 # Mount static files and templates
-app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
+#app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
+app.mount("/static", StaticFiles(directory="/app/frontend/static"), name="static")
 templates = Jinja2Templates(directory="frontend/templates")
 
 # Database setup - use environment variable
