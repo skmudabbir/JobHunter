@@ -5,7 +5,13 @@ from fastapi.responses import HTMLResponse
 from sqlmodel import SQLModel, Session, create_engine, select
 from backend.database import get_db, create_db_and_tables
 from backend.models import Application, Resume
+from fastapi import UploadFile, File, Form
+from fastapi.responses import FileResponse
+import shutil
 import os
+import httpx
+import feedparser
+import asyncio
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -71,7 +77,49 @@ async def create_application(request: Request, db: Session = Depends(get_db)):
 async def resume_manager(request: Request, db: Session = Depends(get_db)):
     resumes = db.exec(select(Resume)).all()
     return templates.TemplateResponse("resumes.html", {"request": request, "resumes": resumes})
+# Ensure resumes directory exists
+RESUMES_DIR = "resumes"
+os.makedirs(RESUMES_DIR, exist_ok=True)
 
+@app.post("/api/upload-resume")
+async def upload_resume(
+    file: UploadFile = File(...),
+    candidate_name: str = Form(...),
+    candidate_email: str = Form(...)
+):
+    try:
+        # Validate file type
+        if not file.filename.endswith(('.pdf', '.doc', '.docx')):
+            raise HTTPException(400, "Only PDF, DOC, and DOCX files allowed")
+        
+        # Save file
+        file_location = f"{RESUMES_DIR}/{candidate_email}_{file.filename}"
+        with open(file_location, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        return {
+            "status": "success",
+            "message": "Resume uploaded successfully",
+            "filename": file.filename,
+            "saved_as": file_location
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Upload failed: {str(e)}")
+
+@app.get("/api/resumes")
+async def list_resumes():
+    try:
+        resumes = []
+        if os.path.exists(RESUMES_DIR):
+            for filename in os.listdir(RESUMES_DIR):
+                if filename.endswith(('.pdf', '.doc', '.docx')):
+                    resumes.append({
+                        "filename": filename,
+                        "upload_time": os.path.getctime(f"{RESUMES_DIR}/{filename}")
+                    })
+        return {"resumes": resumes}
+    except Exception as e:
+        raise HTTPException(500, f"Failed to list resumes: {str(e)}")
 @app.post("/resumes/optimize")
 async def optimize_resume(request: Request, db: Session = Depends(get_db)):
     form_data = await request.form()
@@ -95,7 +143,42 @@ async def optimize_resume(request: Request, db: Session = Depends(get_db)):
         <p class="text-blue-700"><strong>Suggestions:</strong> {result['suggestions']}</p>
     </div>
     """)
-
+@app.get("/api/jobs/rss")
+async def fetch_rss_jobs(url: str = None):
+    try:
+        # Default job RSS feeds if no URL provided
+        default_feeds = [
+            "https://stackoverflow.com/jobs/feed",
+            "https://www.indeed.com/rss?q=python&l=remote",
+            "https://news.ycombinator.com/jobsrss"
+        ]
+        
+        all_jobs = []
+        
+        async with httpx.AsyncClient() as client:
+            for feed_url in default_feeds:
+                try:
+                    response = await client.get(feed_url, timeout=10.0)
+                    feed = feedparser.parse(response.content)
+                    
+                    for entry in feed.entries[:10]:  # Limit to 10 per feed
+                        job = {
+                            "title": entry.title,
+                            "link": entry.link,
+                            "published": entry.published if hasattr(entry, 'published') else "",
+                            "summary": entry.summary if hasattr(entry, 'summary') else "",
+                            "source": feed_url
+                        }
+                        all_jobs.append(job)
+                        
+                except Exception as e:
+                    print(f"Failed to fetch {feed_url}: {e}")
+                    continue
+        
+        return {"jobs": all_jobs[:20]}  # Return max 20 jobs
+        
+    except Exception as e:
+        raise HTTPException(500, f"RSS fetch failed: {str(e)}")
 @app.get("/jobs/scrape")
 async def scrape_jobs(request: Request):
     return templates.TemplateResponse("scraper.html", {"request": request})
@@ -150,6 +233,26 @@ async def start_scraping(request: Request):
         {jobs_html}
     </div>
     """)
+# Add database debug endpoint
+@app.get("/debug/database")
+async def debug_database():
+    try:
+        database_url = os.getenv("DATABASE_URL")
+        if not database_url:
+            return {"status": "error", "message": "DATABASE_URL not set"}
+        
+        engine = create_engine(database_url)
+        with Session(engine) as session:
+            # Test simple query
+            session.exec("SELECT 1")
+            
+        return {
+            "status": "success", 
+            "message": "Database connection successful",
+            "database_url": database_url[:20] + "..." if database_url else "Not set"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database connection failed: {str(e)}")
 
 @app.get("/health")
 async def health_check():
