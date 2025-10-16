@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, JSONResponse
-from sqlmodel import SQLModel, Session, create_engine, select, text  # ADD text import
+from sqlmodel import SQLModel, Session, create_engine, select, text
 from backend.database import get_db, create_db_and_tables
 from backend.models import Application, Resume
 from fastapi import UploadFile, File, Form
@@ -19,12 +19,36 @@ load_dotenv()
 
 app = FastAPI(title="JobHunter", version="1.0.0")
 
-# Mount static files and templates - FIXED PATH
-app.mount("/static", StaticFiles(directory="/app/backend/static"), name="static")  # Use backend/static
-templates = Jinja2Templates(directory="frontend/templates")
+# Debug current directory structure
+print("Current working directory:", os.getcwd())
+print("Directory contents:", os.listdir('.'))
+if os.path.exists('backend'):
+    print("Backend contents:", os.listdir('backend'))
+if os.path.exists('frontend'):
+    print("Frontend contents:", os.listdir('frontend'))
 
-# Database setup - use environment variable
+# Mount static files and templates with fallbacks
+try:
+    app.mount("/static", StaticFiles(directory="/app/backend/static"), name="static")
+    print("Mounted static files at /app/backend/static")
+except Exception as e:
+    print(f"Static files error: {e}")
+    try:
+        app.mount("/static", StaticFiles(directory="backend/static"), name="static")
+        print("Mounted static files at backend/static")
+    except Exception as e2:
+        print(f"Backup static files error: {e2}")
+
+try:
+    templates = Jinja2Templates(directory="frontend/templates")
+    print("Templates loaded from frontend/templates")
+except Exception as e:
+    print(f"Templates error: {e}")
+
+# Database setup with better error handling
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./jobhunter.db")
+print(f"Database URL: {DATABASE_URL[:50]}...")  # Log first 50 chars
+
 # Replace postgres:// with postgresql:// for SQLAlchemy compatibility
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
@@ -33,191 +57,74 @@ if DATABASE_URL.startswith("postgres://"):
 if "render.com" in DATABASE_URL and "?" not in DATABASE_URL:
     DATABASE_URL += "?sslmode=require"
 
-engine = create_engine(DATABASE_URL)
+try:
+    engine = create_engine(DATABASE_URL)
+    print("Database engine created successfully")
+except Exception as e:
+    print(f"Database engine creation failed: {e}")
+    # Fallback to SQLite
+    DATABASE_URL = "sqlite:///./jobhunter.db"
+    engine = create_engine(DATABASE_URL)
+    print("Using SQLite fallback")
 
 @app.on_event("startup")
 def on_startup():
-    create_db_and_tables()
-
-# ... (keep your existing dashboard and applications routes) ...
-
-@app.get("/resumes")
-async def resume_manager(request: Request, db: Session = Depends(get_db)):
-    # Get resumes from database AND file system
-    db_resumes = db.exec(select(Resume)).all()
-    
-    # Get file system resumes
-    file_resumes = []
-    if os.path.exists(RESUMES_DIR):
-        for filename in os.listdir(RESUMES_DIR):
-            if filename.endswith(('.pdf', '.doc', '.docx')):
-                file_path = os.path.join(RESUMES_DIR, filename)
-                file_resumes.append({
-                    "filename": filename,
-                    "upload_time": datetime.fromtimestamp(os.path.getctime(file_path)),
-                    "file_path": file_path,
-                    "file_size": os.path.getsize(file_path)
-                })
-    
-    return templates.TemplateResponse("resumes.html", {
-        "request": request, 
-        "db_resumes": db_resumes,
-        "file_resumes": file_resumes
-    })
-
-# Ensure resumes directory exists
-RESUMES_DIR = "resumes"
-os.makedirs(RESUMES_DIR, exist_ok=True)
-
-@app.post("/api/upload-resume")
-async def upload_resume(
-    file: UploadFile = File(...),
-    candidate_name: str = Form(...),
-    candidate_email: str = Form(...),
-    db: Session = Depends(get_db)  # ADD database session
-):
     try:
-        # Validate file type
-        allowed_extensions = ('.pdf', '.doc', '.docx')
-        if not file.filename.lower().endswith(allowed_extensions):
-            raise HTTPException(400, "Only PDF, DOC, and DOCX files allowed")
-        
-        # Validate file size (max 10MB)
-        file.file.seek(0, 2)  # Seek to end
-        file_size = file.file.tell()
-        file.file.seek(0)  # Reset to beginning
-        
-        if file_size > 10 * 1024 * 1024:  # 10MB
-            raise HTTPException(400, "File too large. Maximum size is 10MB")
-        
-        # Create safe filename
-        safe_filename = f"{candidate_email}_{file.filename}".replace(" ", "_")
-        file_location = os.path.join(RESUMES_DIR, safe_filename)
-        
-        # Save file
-        with open(file_location, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        # Save to database
-        resume = Resume(
-            filename=safe_filename,
-            candidate_name=candidate_name,
-            candidate_email=candidate_email,
-            file_path=file_location,
-            file_size=file_size,
-            upload_date=datetime.now()
-        )
-        db.add(resume)
-        db.commit()
-        db.refresh(resume)
-        
-        return JSONResponse({
-            "status": "success",
-            "message": "Resume uploaded successfully",
-            "filename": file.filename,
-            "saved_as": safe_filename,
-            "resume_id": resume.id
-        })
-        
-    except HTTPException:
-        raise
+        create_db_and_tables()
+        print("Database tables created successfully")
     except Exception as e:
-        raise HTTPException(500, f"Upload failed: {str(e)}")
+        print(f"Database table creation failed: {e}")
 
-@app.get("/api/resumes")
-async def list_resumes(db: Session = Depends(get_db)):
-    try:
-        # Get from database
-        db_resumes = db.exec(select(Resume)).all()
-        
-        # Get from file system as backup
-        file_resumes = []
-        if os.path.exists(RESUMES_DIR):
-            for filename in os.listdir(RESUMES_DIR):
-                if filename.endswith(('.pdf', '.doc', '.docx')):
-                    file_path = os.path.join(RESUMES_DIR, filename)
-                    file_resumes.append({
-                        "filename": filename,
-                        "upload_time": os.path.getctime(file_path),
-                        "file_path": file_path
-                    })
-        
-        return {
-            "db_resumes": [{
-                "id": r.id,
-                "filename": r.filename,
-                "candidate_name": r.candidate_name,
-                "candidate_email": r.candidate_email,
-                "upload_date": r.upload_date.isoformat() if r.upload_date else None
-            } for r in db_resumes],
-            "file_resumes": file_resumes
-        }
-    except Exception as e:
-        raise HTTPException(500, f"Failed to list resumes: {str(e)}")
+# Basic routes that should always work
+@app.get("/")
+async def root():
+    return {"message": "JobHunter API is running", "status": "healthy"}
 
-@app.get("/api/download-resume/{resume_id}")
-async def download_resume(resume_id: int, db: Session = Depends(get_db)):
-    resume = db.get(Resume, resume_id)
-    if not resume or not os.path.exists(resume.file_path):
-        raise HTTPException(404, "Resume not found")
-    
-    return FileResponse(
-        resume.file_path,
-        filename=resume.filename,
-        media_type='application/octet-stream'
-    )
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy", "message": "JobHunter API is running"}
 
-# ... (keep your existing optimize_resume, jobs/rss, and scrape routes) ...
+# Debug endpoints
+@app.get("/debug")
+async def debug_info():
+    return {
+        "current_directory": os.getcwd(),
+        "directory_contents": os.listdir('.'),
+        "database_url_set": bool(os.getenv("DATABASE_URL")),
+        "static_files_path": "/app/backend/static",
+        "templates_path": "frontend/templates"
+    }
 
-# FIXED debug database endpoint
 @app.get("/debug/database")
 async def debug_database():
     try:
-        database_url = os.getenv("DATABASE_URL")
-        if not database_url:
-            return {
-                "status": "error", 
-                "message": "DATABASE_URL environment variable not set"
-            }
+        database_url = os.getenv("DATABASE_URL", "sqlite:///./jobhunter.db")
         
-        # Test connection with proper text() wrapper
+        # Test connection
         engine = create_engine(database_url)
         with Session(engine) as session:
-            # Test 1: Basic connection
+            # Test basic connection
             result = session.exec(text("SELECT 1 as test"))
             basic_test = result.first()
-            
-            # Test 2: Check if tables exist
-            if "sqlite" in database_url:
-                table_check = session.exec(text("""
-                    SELECT name FROM sqlite_master 
-                    WHERE type='table' AND name NOT LIKE 'sqlite_%'
-                """))
-            else:  # PostgreSQL
-                table_check = session.exec(text("""
-                    SELECT table_name FROM information_schema.tables 
-                    WHERE table_schema = 'public'
-                """))
-            
-            tables = [row[0] for row in table_check]
             
         return {
             "status": "success", 
             "message": "Database connection successful",
             "basic_test": basic_test,
-            "existing_tables": tables,
             "database_type": "SQLite" if "sqlite" in database_url else "PostgreSQL"
         }
     except Exception as e:
         return {
             "status": "error",
             "message": "Database connection failed",
-            "error": str(e)
+            "error": str(e),
+            "database_url_preview": database_url[:50] + "..." if database_url else "Not set"
         }
 
 @app.get("/debug/resumes")
 async def debug_resumes():
     """Debug endpoint to check resume directory and files"""
+    RESUMES_DIR = "resumes"
     resumes_dir_exists = os.path.exists(RESUMES_DIR)
     files = []
     
@@ -231,16 +138,59 @@ async def debug_resumes():
         "current_working_dir": os.getcwd()
     }
 
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy", "message": "JobHunter API is running"}
+# Template routes with error handling
+@app.get("/dashboard")
+async def dashboard(request: Request):
+    try:
+        db = next(get_db())
+        applications = db.exec(select(Application)).all()
+        return templates.TemplateResponse("dashboard.html", {"request": request, "applications": applications})
+    except Exception as e:
+        return JSONResponse({"error": f"Dashboard failed: {str(e)}"}, status_code=500)
 
-# Add CORS if needed (for mobile app)
+@app.get("/jobs/scrape")
+async def scrape_jobs(request: Request):
+    try:
+        return templates.TemplateResponse("scraper.html", {"request": request})
+    except Exception as e:
+        return JSONResponse({"error": f"Template not found: {str(e)}"}, status_code=500)
+
+@app.get("/resumes")
+async def resume_manager(request: Request):
+    try:
+        db = next(get_db())
+        db_resumes = db.exec(select(Resume)).all()
+        
+        # Get file system resumes
+        file_resumes = []
+        RESUMES_DIR = "resumes"
+        if os.path.exists(RESUMES_DIR):
+            for filename in os.listdir(RESUMES_DIR):
+                if filename.endswith(('.pdf', '.doc', '.docx')):
+                    file_path = os.path.join(RESUMES_DIR, filename)
+                    file_resumes.append({
+                        "filename": filename,
+                        "upload_time": datetime.fromtimestamp(os.path.getctime(file_path)),
+                        "file_path": file_path,
+                    })
+        
+        return templates.TemplateResponse("resumes.html", {
+            "request": request, 
+            "db_resumes": db_resumes,
+            "file_resumes": file_resumes
+        })
+    except Exception as e:
+        return JSONResponse({"error": f"Resumes page failed: {str(e)}"}, status_code=500)
+
+# Keep your existing API routes (upload-resume, jobs/rss, etc.)
+# ... [your existing API routes here] ...
+
+# Add CORS if needed
 from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust in production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
