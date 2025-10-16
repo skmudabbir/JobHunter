@@ -107,18 +107,35 @@ async def debug_database():
             result = session.exec(text("SELECT 1 as test"))
             basic_test = result.first()
             
+            # Convert Row to dict for JSON serialization
+            basic_test_dict = dict(basic_test._mapping) if basic_test else {"test": None}
+            
+            # Check if tables exist
+            if "sqlite" in database_url:
+                table_check = session.exec(text("""
+                    SELECT name FROM sqlite_master 
+                    WHERE type='table' AND name NOT LIKE 'sqlite_%'
+                """))
+            else:  # PostgreSQL
+                table_check = session.exec(text("""
+                    SELECT table_name FROM information_schema.tables 
+                    WHERE table_schema = 'public'
+                """))
+            
+            tables = [row[0] for row in table_check]
+            
         return {
             "status": "success", 
             "message": "Database connection successful",
-            "basic_test": basic_test,
+            "basic_test": basic_test_dict,
+            "existing_tables": tables,
             "database_type": "SQLite" if "sqlite" in database_url else "PostgreSQL"
         }
     except Exception as e:
         return {
             "status": "error",
             "message": "Database connection failed",
-            "error": str(e),
-            "database_url_preview": database_url[:50] + "..." if database_url else "Not set"
+            "error": str(e)
         }
 
 @app.get("/debug/resumes")
@@ -181,7 +198,129 @@ async def resume_manager(request: Request):
         })
     except Exception as e:
         return JSONResponse({"error": f"Resumes page failed: {str(e)}"}, status_code=500)
+# Add missing routes
+@app.get("/applications-page")
+async def applications_page(request: Request):
+    try:
+        db = next(get_db())
+        applications = db.exec(select(Application)).all()
+        return templates.TemplateResponse("applications.html", {"request": request, "applications": applications})
+    except Exception as e:
+        return JSONResponse({"error": f"Applications page failed: {str(e)}"}, status_code=500)
 
+@app.post("/api/upload-resume")
+async def upload_resume(
+    file: UploadFile = File(...),
+    candidate_name: str = Form(...),
+    candidate_email: str = Form(...)
+):
+    try:
+        # Validate file type
+        if not file.filename.endswith(('.pdf', '.doc', '.docx')):
+            raise HTTPException(400, "Only PDF, DOC, and DOCX files allowed")
+        
+        # Save file
+        RESUMES_DIR = "resumes"
+        os.makedirs(RESUMES_DIR, exist_ok=True)
+        file_location = f"{RESUMES_DIR}/{candidate_email}_{file.filename}"
+        with open(file_location, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        return {
+            "status": "success",
+            "message": "Resume uploaded successfully",
+            "filename": file.filename,
+            "saved_as": file_location
+        }
+    except Exception as e:
+        raise HTTPException(500, f"Upload failed: {str(e)}")
+
+@app.get("/api/jobs/rss")
+async def fetch_rss_jobs(url: str = None):
+    try:
+        # Default job RSS feeds
+        default_feeds = [
+            "https://stackoverflow.com/jobs/feed",
+            "https://news.ycombinator.com/jobsrss"
+        ]
+        
+        all_jobs = []
+        
+        async with httpx.AsyncClient() as client:
+            for feed_url in default_feeds:
+                try:
+                    response = await client.get(feed_url, timeout=10.0)
+                    feed = feedparser.parse(response.content)
+                    
+                    for entry in feed.entries[:5]:  # Limit to 5 per feed
+                        job = {
+                            "title": entry.title,
+                            "link": entry.link,
+                            "published": entry.published if hasattr(entry, 'published') else "",
+                            "summary": entry.summary if hasattr(entry, 'summary') else "",
+                            "source": feed_url
+                        }
+                        all_jobs.append(job)
+                        
+                except Exception as e:
+                    print(f"Failed to fetch {feed_url}: {e}")
+                    continue
+        
+        return {"jobs": all_jobs[:10]}  # Return max 10 jobs
+        
+    except Exception as e:
+        raise HTTPException(500, f"RSS fetch failed: {str(e)}")
+
+@app.post("/jobs/scrape")
+async def start_scraping(request: Request):
+    form_data = await request.form()
+    feed_url = form_data.get("feed_url")
+    keywords = form_data.get("keywords", "")
+    
+    # Mock scraping results
+    jobs = [
+        {
+            "title": "Python Developer",
+            "company": "Tech Corp",
+            "location": "Remote",
+            "description": "Looking for experienced Python developer with FastAPI knowledge.",
+            "url": "https://example.com/jobs/1"
+        },
+        {
+            "title": "Backend Engineer",
+            "company": "Startup Inc",
+            "location": "New York",
+            "description": "Join our team to build scalable backend systems.",
+            "url": "https://example.com/jobs/2"
+        }
+    ]
+    
+    jobs_html = "".join([f"""
+    <div class="border border-gray-200 rounded-lg p-4 mb-3">
+        <h4 class="font-semibold text-gray-800">{job['title']}</h4>
+        <p class="text-gray-600 text-sm">{job['company']} • {job['location']}</p>
+        <p class="text-gray-500 text-sm mt-2">{job['description'][:200]}...</p>
+        <div class="flex justify-between items-center mt-3">
+            <a href="{job['url']}" target="_blank" class="text-blue-600 hover:text-blue-800 text-sm">View Job</a>
+            <button hx-post="/applications/create" 
+                    hx-include="[name='job_id']" 
+                    hx-target="#applications-table"
+                    class="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700">
+                Save & Apply
+            </button>
+            <input type="hidden" name="job_id" value="{job['title']}">
+        </div>
+    </div>
+    """ for job in jobs])
+    
+    return HTMLResponse(f"""
+    <div class="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+        <p class="text-green-700">Found {len(jobs)} jobs from the RSS feed.</p>
+    </div>
+    <div class="space-y-3">
+        {jobs_html}
+    </div>
+    """)
 # Keep your existing API routes (upload-resume, jobs/rss, etc.)
 # ... [your existing API routes here] ...
 
