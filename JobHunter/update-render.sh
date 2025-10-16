@@ -1,0 +1,25 @@
+# Updated render.yaml
+cat > render.yaml << 'EOF'
+services:
+  - type: web
+    name: jobhunter
+    env: docker
+    plan: free
+    docker:
+      dockerfile: Dockerfile
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: jobhunter-db
+          property: connectionString
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: PYTHONPATH
+        value: /app
+
+databases:
+  - name: jobhunter-db
+    databaseName: jobhunter
+    user: jobhunter
+    plan: free
+EOF

@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+    <!-- Stats Cards -->
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex items-center">
+            <div class="p-3 bg-blue-100 rounded-lg">
+                <i class="fas fa-briefcase text-blue-600 text-xl"></i>
+            </div>
+            <div class="ml-4">
+                <h3 class="text-lg font-semibold text-gray-700">Total Applications</h3>
+                <p class="text-2xl font-bold text-gray-900">{{ applications|length }}</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex items-center">
+            <div class="p-3 bg-green-100 rounded-lg">
+                <i class="fas fa-calendar-check text-green-600 text-xl"></i>
+            </div>
+            <div class="ml-4">
+                <h3 class="text-lg font-semibold text-gray-700">Interviews</h3>
+                <p class="text-2xl font-bold text-gray-900">
+                    {{ applications|selectattr("status", "equalto", "interview")|list|length }}
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex items-center">
+            <div class="p-3 bg-purple-100 rounded-lg">
+                <i class="fas fa-file-alt text-purple-600 text-xl"></i>
+            </div>
+            <div class="ml-4">
+                <h3 class="text-lg font-semibold text-gray-700">Active Resumes</h3>
+                <p class="text-2xl font-bold text-gray-900">3</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+    <!-- Recent Applications -->
+    <div class="bg-white rounded-lg shadow">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h2 class="text-xl font-semibold text-gray-800">Recent Applications</h2>
+        </div>
+        <div class="p-6">
+            {% for app in applications[:5] %}
+            <div class="border-b border-gray-100 py-3 last:border-b-0">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <h4 class="font-semibold text-gray-800">{{ app.title }}</h4>
+                        <p class="text-gray-600 text-sm">{{ app.company }} • {{ app.location }}</p>
+                    </div>
+                    <span class="px-2 py-1 text-xs rounded-full 
+                        {% if app.status == 'applied' %}bg-blue-100 text-blue-800
+                        {% elif app.status == 'interview' %}bg-green-100 text-green-800
+                        {% elif app.status == 'offer' %}bg-purple-100 text-purple-800
+                        {% else %}bg-gray-100 text-gray-800{% endif %}">
+                        {{ app.status }}
+                    </span>
+                </div>
+            </div>
+            {% else %}
+            <p class="text-gray-500 text-center py-4">No applications yet. Start by scraping some jobs!</p>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="bg-white rounded-lg shadow">
+        <div class="px-6 py-4 border-b border-gray-200">
+            <h2 class="text-xl font-semibold text-gray-800">Quick Actions</h2>
+        </div>
+        <div class="p-6 grid grid-cols-2 gap-4">
+            <a href="/jobs/scrape" class="bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg p-4 text-center transition-colors">
+                <i class="fas fa-rss text-blue-600 text-2xl mb-2"></i>
+                <h3 class="font-semibold text-blue-800">Scrape Jobs</h3>
+                <p class="text-sm text-blue-600 mt-1">Find new opportunities</p>
+            </a>
+            
+            <a href="/resumes" class="bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg p-4 text-center transition-colors">
+                <i class="fas fa-file-alt text-green-600 text-2xl mb-2"></i>
+                <h3 class="font-semibold text-green-800">Manage Resumes</h3>
+                <p class="text-sm text-green-600 mt-1">Optimize your CV</p>
+            </a>
+            
+            <a href="/applications" class="bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg p-4 text-center transition-colors">
+                <i class="fas fa-list-alt text-purple-600 text-2xl mb-2"></i>
+                <h3 class="font-semibold text-purple-800">Track Applications</h3>
+                <p class="text-sm text-purple-600 mt-1">Monitor progress</p>
+            </a>
+            
+            <div class="bg-orange-50 hover:bg-orange-100 border border-orange-200 rounded-lg p-4 text-center transition-colors">
+                <i class="fas fa-envelope text-orange-600 text-2xl mb-2"></i>
+                <h3 class="font-semibold text-orange-800">Cover Letters</h3>
+                <p class="text-sm text-orange-600 mt-1">Generate letters</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,15 @@
+# Create production environment example
+cat > .env.production << 'EOF'
+# Production Environment Variables
+DATABASE_URL=postgresql://user:password@localhost/jobhunter
+
+# Optional: OpenAI for enhanced features
+OPENAI_API_KEY=your_openai_api_key_here
+
+# Application Settings
+DEBUG=False
+SECRET_KEY=your-production-secret-key-change-this
+
+# CORS Settings (if needed)
+CORS_ORIGINS=https://your-render-app.onrender.com
+EOF
