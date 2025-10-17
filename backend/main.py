@@ -76,9 +76,9 @@ def on_startup():
         print(f"Database table creation failed: {e}")
 
 # Basic routes that should always work
-@app.get("/")
-async def root():
-    return {"message": "JobHunter API is running", "status": "healthy"}
+# @app.get("/")
+# async def root():
+#     return {"message": "JobHunter API is running", "status": "healthy"}
 
 @app.get("/health")
 async def health_check():
@@ -156,6 +156,16 @@ async def debug_resumes():
     }
 
 # Template routes with error handling
+@app.get("/")
+async def dashboard(request: Request):
+    try:
+        db = next(get_db())
+        applications = db.exec(select(Application)).all()
+        return templates.TemplateResponse("dashboard.html", {"request": request, "applications": applications})
+    except Exception as e:
+        return JSONResponse({"error": f"Dashboard failed: {str(e)}"}, status_code=500)
+
+# Template routes with error handling
 @app.get("/dashboard")
 async def dashboard(request: Request):
     try:
@@ -164,6 +174,7 @@ async def dashboard(request: Request):
         return templates.TemplateResponse("dashboard.html", {"request": request, "applications": applications})
     except Exception as e:
         return JSONResponse({"error": f"Dashboard failed: {str(e)}"}, status_code=500)
+
 
 @app.get("/jobs/scrape")
 async def scrape_jobs(request: Request):
